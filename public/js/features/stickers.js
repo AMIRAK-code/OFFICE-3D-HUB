@@ -4,6 +4,7 @@ import { h, $, resizeImage, readFile, pickFile, fullName } from '../util.js';
 import { toast, toastError, openPopover, menuItem, confirmDialog } from '../ui/kit.js';
 import { boardUVAt, placeSticker, highlightBoard, isOverTrash } from '../scene/wall.js';
 import { room } from '../scene/room.js';
+import { openMemoDialog } from './memos.js';
 import { sfx } from '../audio.js';
 
 export const STARTER = ['🎉', '❤️', '👍', '🔥', '⭐', '😂', '🚀', '☕', '🍕', '🌈', '🦄', '🐱', '👏', '💯', '🌻', '🍩', '🥳', '🙏'];
@@ -112,7 +113,7 @@ function makeDraggable(tile, resolveSticker, onTap, sticker = null) {
 
 async function trashLibrarySticker(sticker) {
   if (!sticker) return toast('Starter stickers can’t be thrown away — drag your own uploads here instead', { icon: '🗑️' });
-  if (sticker.by !== store.me.id) return toast('You can only throw away stickers you uploaded', { icon: '🗑️' });
+  if (sticker.by !== store.me.id && !store.me.admin) return toast('You can only throw away stickers you uploaded', { icon: '🗑️' });
   if (!(await confirmDialog('Throw this sticker away? It will also disappear from the wall.'))) return;
   try {
     await act('sticker.remove', { id: sticker.id });
@@ -127,7 +128,7 @@ async function trashLibrarySticker(sticker) {
 let tray = null;
 
 function stickerMenu(tile, resolve, sticker) {
-  const own = sticker && sticker.by === store.me.id;
+  const own = sticker && (sticker.by === store.me.id || store.me.admin);
   const by = sticker && store.user(sticker.by);
   openPopover(tile, [
     sticker && !isEmojiSticker(sticker) ? h('div', { class: 'menu-note' }, own ? 'Uploaded by you' : `Uploaded by ${fullName(by)}`) : null,
@@ -160,6 +161,7 @@ function renderTray() {
   const library = store.list('stickers').filter((s) => !isEmojiSticker(s)).sort((a, b) => b.at - a.at);
   const tiles = [];
   tiles.push(h('button', { class: 'tile tile-upload', title: 'Upload a sticker', onClick: uploadFromPicker }, h('span', {}, '＋'), h('small', {}, 'Upload')));
+  tiles.push(h('button', { class: 'tile tile-note', title: 'Write a text note', onClick: openMemoDialog }, h('span', {}, '📝'), h('small', {}, 'Note')));
   for (const s of library) {
     const tile = h('button', { class: 'tile', title: s.name }, h('img', { src: s.url, alt: s.name, draggable: 'false', loading: 'lazy' }));
     const resolve = async () => s;

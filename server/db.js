@@ -12,7 +12,7 @@ const DB_FILE = path.join(DATA_DIR, 'db.json');
 
 fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 
-const COLLECTIONS = ['users', 'sessions', 'stickers', 'wall', 'requests', 'podcasts', 'music', 'shows', 'books', 'giveaways', 'mail'];
+const COLLECTIONS = ['users', 'sessions', 'stickers', 'wall', 'requests', 'podcasts', 'music', 'shows', 'books', 'places', 'giveaways', 'mail'];
 
 function load() {
   let data = {};

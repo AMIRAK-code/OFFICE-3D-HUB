@@ -5,11 +5,13 @@ import { openPanel, openPopover, closePopover, menuItem, toast, toastError, empt
 import { sfx, isMuted, setMuted } from '../audio.js';
 import { unreadMail } from '../features/mail.js';
 import { KINDS } from '../features/games.js';
+import * as jb from '../jukebox.js';
 
 const DOCK = [
   ['radio', '📻', 'Radio', '#ff7a2f'],
   ['tv', '📺', 'Watchlist', '#228be6'],
   ['books', '📚', 'Books', '#d9480f'],
+  ['places', '📍', 'Places', '#1c7ed6'],
   ['basket', '🧺', 'Giveaways', '#0f8a4a'],
   ['birthdays', '🎂', 'Birthdays', '#f03e83'],
   ['requests', '📌', 'Requests', '#f59f00'],
@@ -84,6 +86,16 @@ function drawMail() {
   els.mailBadge.textContent = n > 9 ? '9+' : String(n);
 }
 
+function drawJukeboxBtn() {
+  const on = jb.isListening();
+  els.jukebox.textContent = '🎧';
+  els.jukebox.classList.toggle('off', !on);
+  els.jukebox.classList.toggle('live', on && jb.isPlaying());
+  els.jukebox.setAttribute('aria-pressed', String(on));
+  els.jukebox.title = on ? 'Jukebox: listening (click to mute)' : 'Jukebox: muted (click to listen)';
+  els.jukebox.setAttribute('aria-label', els.jukebox.title);
+}
+
 function drawSound() {
   els.sound.textContent = isMuted() ? '🔇' : '🔊';
   els.sound.title = isMuted() ? 'Sound off' : 'Sound on';
@@ -104,6 +116,13 @@ export function initHud(config) {
   els.stack = h('span', { class: 'stack' });
   els.count = h('span', { class: 'online-count' });
   els.mailBadge = h('span', { class: 'badge', hidden: true });
+  els.jukebox = h('button', {
+    class: 'glass icon-btn jb-btn',
+    onClick: () => {
+      jb.setListening(!jb.isListening());
+      sfx.click();
+    },
+  });
   els.sound = h('button', {
     class: 'glass icon-btn',
     onClick: () => {
@@ -127,15 +146,19 @@ export function initHud(config) {
       h('div', { class: 'top-right' },
         h('button', { class: 'glass people-btn', 'aria-label': 'People', onClick: () => emit('open', { name: 'people' }) }, els.stack, els.count),
         h('button', { class: 'glass icon-btn', 'aria-label': 'Sticker mail', title: 'Sticker mail', onClick: () => emit('open', { name: 'mail' }) }, '📬', els.mailBadge),
+        els.jukebox,
         els.sound,
         els.me)),
     els.dock,
   );
   hud.classList.remove('hidden');
   drawSound();
+  drawJukeboxBtn();
   tickClock();
   setInterval(tickClock, 15e3);
 
+  on('jukebox:listen', drawJukeboxBtn);
+  on('jukebox', drawJukeboxBtn);
   on('me', drawMe);
   on('presence', drawOnline);
   on('col:users', () => {

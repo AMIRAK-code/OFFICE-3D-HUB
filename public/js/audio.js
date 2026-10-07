@@ -30,6 +30,8 @@ export function unlockAudio() {
     /* audio unavailable */
   }
 }
+/** The shared AudioContext and master gain (null until the first user gesture). */
+export const getAudio = () => (ctx ? { ctx, master } : null);
 export const audioReady = () => !!ctx && ctx.state === 'running';
 /** Run fn as soon as audio is allowed to play. */
 export function whenAudioReady(fn) {

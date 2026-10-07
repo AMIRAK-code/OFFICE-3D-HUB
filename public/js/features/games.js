@@ -4,11 +4,14 @@ import { h, avatarEl, fullName } from '../util.js';
 import { openPanel, currentPanel, emptyState, busy, toast, toastError, openPopover, menuItem } from '../ui/kit.js';
 import { room } from '../scene/room.js';
 import { sfx } from '../audio.js';
+import { focusOn } from '../scene/core.js';
+import { dartsView, throwDart } from './darts.js';
 
 export const KINDS = {
   ttt: { name: 'Tic-Tac-Toe', icon: '❌⭕', desc: 'Three in a row wins' },
   c4: { name: 'Connect Four', icon: '🔴🟡', desc: 'Drop discs, connect four' },
   rps: { name: 'Rock Paper Scissors', icon: '✊✌️', desc: 'Best of three rounds' },
+  darts: { name: 'Darts', icon: '🎯', desc: '3 rounds, highest score wins' },
 };
 const RPS = { rock: '✊', paper: '✋', scissors: '✌️' };
 const DISC = ['#fa5252', '#fcc419'];
@@ -106,7 +109,7 @@ function playerBadge(g, i, meIdx) {
   if (!id) return h('div', { class: 'player empty' }, h('span', { class: 'av', style: '--s:40px' }, '?'), h('small', {}, 'Waiting…'));
   const u = store.user(id);
   const turn = g.status === 'playing' && g.kind !== 'rps' && g.state.turn === i;
-  const mark = g.kind === 'ttt' ? MARK[i] : g.kind === 'c4' ? h('i', { class: 'disc-dot', style: `background:${DISC[i]}` }) : g.state ? String(g.state.score[i]) : '';
+  const mark = g.kind === 'ttt' ? MARK[i] : g.kind === 'c4' ? h('i', { class: 'disc-dot', style: `background:${DISC[i]}` }) : g.state ? String(g.kind === 'darts' ? g.state.scores[i] : g.state.score[i]) : '';
   return h('div', { class: `player${turn ? ' turn' : ''}${g.gone.includes(id) ? ' gone' : ''}` },
     avatarEl(u, 40),
     h('b', {}, i === meIdx ? 'You' : u?.firstName || '?'),
@@ -178,8 +181,13 @@ function pickRps(g, k) {
 function onRpsKey(e) {
   if (e.ctrlKey || e.metaKey || e.altKey || e.repeat) return;
   if (e.target.closest?.('input, textarea, select, [contenteditable]')) return;
-  const pick = KEY_TO_PICK[e.key.toLowerCase()];
   const g = viewing && store.cols.games.get(viewing);
+  if (g?.kind === 'darts' && (e.key === ' ' || e.key === 'Enter') && !e.target.closest?.('button, a')) {
+    e.preventDefault();
+    throwDart(g);
+    return;
+  }
+  const pick = KEY_TO_PICK[e.key.toLowerCase()];
   if (!pick || !g || g.kind !== 'rps') return;
   e.preventDefault();
   pickRps(g, pick);
@@ -196,7 +204,7 @@ function gameView(g) {
     redraw();
   };
   const board = !g.state ? h('div', { class: 'waiting-dots' }, h('i'), h('i'), h('i'))
-    : g.kind === 'ttt' ? tttBoard(g, meIdx) : g.kind === 'c4' ? c4Board(g, meIdx) : rpsBoard(g, meIdx);
+    : g.kind === 'ttt' ? tttBoard(g, meIdx) : g.kind === 'c4' ? c4Board(g, meIdx) : g.kind === 'darts' ? dartsView(g, meIdx) : rpsBoard(g, meIdx);
   const opponentGone = g.gone.length > 0;
   const iVoted = g.rematch.includes(me);
   return h('div', { class: `game-view gv-${g.kind}` },
@@ -217,14 +225,16 @@ function gameView(g) {
 }
 
 // ---------------------------------------------------------------- panel
-export function openGames({ gameId } = {}) {
+export function openGames({ gameId, focus } = {}) {
   if (gameId) viewing = gameId;
   else if (!viewing || !store.cols.games.has(viewing)) viewing = myActiveGame()?.id || null;
   if (currentPanel() === 'games') {
+    if (focus) focusOn(focus);
     redraw?.();
     return;
   }
-  room.arcade.flash();
+  if (focus === 'darts') room.dartboard.shake();
+  else room.arcade.flash();
   sfx.arcade();
   openPanel({
     key: 'games',
@@ -232,7 +242,7 @@ export function openGames({ gameId } = {}) {
     subtitle: 'Challenge a colleague to a quick game',
     icon: '🕹️',
     accent: '#7950f2',
-    focus: 'games',
+    focus: focus || 'games',
     render(body, panel) {
       redraw = () => {
         const g = viewing && store.cols.games.get(viewing);
