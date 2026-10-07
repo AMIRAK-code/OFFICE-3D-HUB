@@ -62,11 +62,13 @@ export function emit(evt, data) {
 }
 
 // ---------- store ----------
-const COLS = ['users', 'stickers', 'wall', 'requests', 'podcasts', 'music', 'shows', 'books', 'giveaways', 'games', 'mail'];
+const COLS = ['users', 'stickers', 'wall', 'requests', 'podcasts', 'music', 'shows', 'books', 'places', 'giveaways', 'games', 'mail'];
 
 export const store = {
   me: null,
   ready: false,
+  jukebox: null, // { track, playing, pos, at (server time), by }
+  clockOffset: 0, // server time minus this device's time
   online: new Set(),
   cols: Object.fromEntries(COLS.map((c) => [c, new Map()])),
   user(id) {
@@ -78,6 +80,12 @@ export const store = {
 };
 
 let socket = null;
+
+function setJukebox({ state, now }) {
+  store.clockOffset = now - Date.now();
+  store.jukebox = state;
+  emit('jukebox', state);
+}
 
 export function connect() {
   socket = window.io({ auth: { token: auth.token }, transports: ['websocket', 'polling'] });
@@ -93,6 +101,7 @@ export function connect() {
     store.online = new Set(data.online);
     store.online.add(data.me.id);
     for (const c of COLS) store.cols[c] = new Map((data.cols[c] || []).map((i) => [i.id, i]));
+    if (data.jukebox) setJukebox(data.jukebox);
     const first = !store.ready;
     store.ready = true;
     if (first) emit('ready');
@@ -127,6 +136,7 @@ export function connect() {
     emit('presence', { id, online });
   });
 
+  socket.on('jukebox', (d) => setJukebox(d));
   socket.on('cursor', (d) => emit('cursor', d));
   socket.on('ping:click', (d) => emit('ping', d));
   socket.on('toast', (t) => emit('toast', t));

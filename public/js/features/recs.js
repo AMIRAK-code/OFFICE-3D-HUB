@@ -6,7 +6,8 @@ import { room } from '../scene/room.js';
 import { sfx } from '../audio.js';
 
 const PLATFORMS = ['Netflix', 'Prime Video', 'Disney+', 'Apple TV+', 'Max', 'NOW', 'RaiPlay', 'Paramount+', 'YouTube', 'Cinema', 'Other'];
-const GENRES = ['Pop', 'Rock', 'Hip-hop', 'Electronic', 'Jazz', 'Classical', 'Indie', 'R&B', 'Lo-fi / Focus', 'Italian', 'Other'];
+const PLACE_KINDS = { restaurant: '🍽️ Restaurant', cafe: '☕ Café', shop: '🛍️ Shop', bar: '🍸 Bar', other: '✨ Other' };
+const GENRES =['Pop', 'Rock', 'Hip-hop', 'Electronic', 'Jazz', 'Classical', 'Indie', 'R&B', 'Lo-fi / Focus', 'Italian', 'Other'];
 
 // One entry per kind of recommendation.
 const KINDS = {
@@ -25,6 +26,11 @@ const KINDS = {
     placeholder: 'e.g. The Bear', notePlaceholder: 'Why should we watch it? No spoilers 🙊', action: '▶ Watch',
     empty: ['🍿', 'Nothing on TV yet', 'Recommend a movie or a series to get the show started.'],
   },
+  places: {
+    add: '＋ Share a place', thanks: 'Added to the top places! 📍', icon: '📍',
+    placeholder: 'e.g. Trattoria da Mario', notePlaceholder: 'What should we order? Best time to go?', action: '🗺️ Open in Maps',
+    empty: ['🗺️', 'No places yet', 'Share a restaurant, café or shop that’s worth a visit.'],
+  },
   books: {
     add: '＋ Recommend a book', thanks: 'On the shelf! Thanks for the recommendation 📚', icon: '📚',
     placeholder: 'e.g. Atomic Habits', notePlaceholder: 'What did you love about it?', action: '📖 Open',
@@ -36,6 +42,7 @@ const KINDS = {
 const PANELS = {
   radio: { cols: ['podcasts', 'music'], title: 'Office Radio', subtitle: 'Podcasts & music picks from your colleagues', icon: '📻', accent: '#ff7a2f', focus: 'radio' },
   tv: { cols: ['shows'], title: 'Movie & Series TV', subtitle: 'What should we watch next?', icon: '📺', accent: '#228be6', focus: 'tv' },
+  places: { cols: ['places'], title: 'Top Places', subtitle: 'Cool spots in the city, picked by the team', icon: '📍', accent: '#1c7ed6', focus: 'places' },
   books: { cols: ['books'], title: 'Book Club', subtitle: 'Good reads recommended by the team', icon: '📚', accent: '#d9480f', focus: 'books' },
 };
 
@@ -72,11 +79,21 @@ function composer(col) {
         field('Your rating', starInput(0, (v) => { data.rating = v; }))),
       field('Platform', extra.platform),
     );
+  } else if (col === 'places') {
+    data.kind = 'restaurant';
+    extra.map = h('input', { class: 'input', required: true, maxlength: '500', inputmode: 'url', placeholder: 'Paste a Google Maps link, or type the address' });
+    fields.push(
+      h('div', { class: 'row gap wrap' },
+        field('Type', h('select', { class: 'input', onChange: (e) => { data.kind = e.target.value; } }, ...Object.entries(PLACE_KINDS).map(([v, label]) => h('option', { value: v }, label)))),
+        field('Your rating', starInput(0, (v) => { data.rating = v; }))),
+      field('Google Maps link or address', extra.map, 'Tip: in Google Maps tap Share → Copy link'),
+    );
   } else if (col === 'books') {
     extra.author = h('input', { class: 'input', maxlength: '80', placeholder: 'Author' });
     fields.push(h('div', { class: 'row gap wrap' }, field('Author', extra.author), field('Your rating', starInput(0, (v) => { data.rating = v; }))));
   }
-  fields.push(field('Link', url), field('Your note', note));
+  if (col !== 'places') fields.push(field('Link', url));
+  fields.push(field('Your note', note));
   const submit = h('button', { class: 'btn', type: 'submit' }, 'Recommend');
   const form = h('form', { class: 'composer-form' }, ...fields, h('div', { class: 'row end' }, submit));
   const details = h('details', { class: 'composer' }, h('summary', {}, k.add), form);
@@ -88,6 +105,7 @@ function composer(col) {
       if (col === 'music') Object.assign(payload, { artist: extra.artist.value, genre: extra.genre.value });
       if (col === 'shows') Object.assign(payload, { kind: data.kind, rating: data.rating, platform: extra.platform.value });
       if (col === 'books') Object.assign(payload, { author: extra.author.value, rating: data.rating });
+      if (col === 'places') Object.assign(payload, { kind: data.kind, rating: data.rating, map: extra.map.value });
       await act(`${col}.add`, payload);
       form.reset();
       details.open = false;
@@ -106,6 +124,7 @@ function stars(n) {
 
 function metaFor(col, it) {
   if (col === 'shows') return [h('span', { class: `chip ${it.kind}` }, it.kind === 'series' ? '📺 Series' : '🎬 Movie'), it.platform ? h('span', { class: 'chip' }, it.platform) : null, it.rating ? stars(it.rating) : null];
+  if (col === 'places') return [h('span', { class: 'chip' }, PLACE_KINDS[it.kind] || PLACE_KINDS.other), it.address ? h('span', { class: 'chip' }, `📍 ${it.address}`) : null, it.rating ? stars(it.rating) : null];
   if (col === 'music') return [it.artist ? h('span', { class: 'chip' }, `🎤 ${it.artist}`) : null, it.genre ? h('span', { class: 'chip' }, it.genre) : null];
   if (col === 'books') return [it.author ? h('span', { class: 'chip' }, `✍️ ${it.author}`) : null, it.rating ? stars(it.rating) : null];
   return [it.host ? h('span', { class: 'chip' }, `🎙️ ${it.host}`) : null];
@@ -223,6 +242,7 @@ function section(col, panel) {
   const controls = h('div', { class: 'list-controls' },
     segmented([['top', '🔥 Popular'], ['new', '🆕 Newest']], sort, (v) => { sort = v; draw(); }),
     col === 'shows' ? segmented([['all', 'All'], ['movie', 'Movies'], ['series', 'Series']], filter, (v) => { filter = v; draw(); }) : null,
+    col === 'places' ? segmented([['all', 'All'], ['restaurant', '🍽️'], ['cafe', '☕'], ['shop', '🛍️'], ['bar', '🍸']], filter, (v) => { filter = v; draw(); }) : null,
     search);
   search.addEventListener('input', () => draw());
   const el = h('div', { class: 'col rec-section' }, composer(col), controls, list);
@@ -231,7 +251,7 @@ function section(col, panel) {
     const q = search.value.trim().toLowerCase();
     const items = store.list(col)
       .filter((it) => filter === 'all' || it.kind === filter)
-      .filter((it) => !q || [it.title, it.host, it.artist, it.author, it.genre, it.platform, it.note].join(' ').toLowerCase().includes(q))
+      .filter((it) => !q || [it.title, it.host, it.artist, it.author, it.genre, it.platform, it.address, it.note].join(' ').toLowerCase().includes(q))
       .sort((a, b) => (sort === 'top' ? b.likes.length - a.likes.length || b.at - a.at : b.at - a.at));
     const keep = state.focused; // removing a focused input may fire blur and clear it
     list.replaceChildren(...(items.length ? items.map((it) => card(col, it, state)) : [q || filter !== 'all' ? emptyState('🔍', 'No matches', 'Try another search or filter.') : emptyState(...KINDS[col].empty)]));

@@ -7,6 +7,7 @@ export const KINDS = {
   ttt: { name: 'Tic-Tac-Toe' },
   c4: { name: 'Connect Four' },
   rps: { name: 'Rock Paper Scissors' },
+  darts: { name: 'Darts' },
 };
 
 const TTT_LINES = [[0, 1, 2], [3, 4, 5], [6, 7, 8], [0, 3, 6], [1, 4, 7], [2, 5, 8], [0, 4, 8], [2, 4, 6]];
@@ -14,6 +15,24 @@ const C4_COLS = 7;
 const C4_ROWS = 6;
 const RPS_BEATS = { rock: 'scissors', paper: 'rock', scissors: 'paper' };
 const RPS_TARGET = 2; // best of three
+
+// Darts: 3 rounds, 3 darts each per round, highest total wins.
+const DART_ROUNDS = 3;
+const DARTS_PER_TURN = 3;
+const SECTORS = [20, 1, 18, 4, 13, 6, 10, 15, 2, 17, 3, 19, 7, 16, 8, 11, 14, 9, 12, 5]; // clockwise from the top
+
+/** Score a dart that landed at (x, y); board radius = 1, +y is down, (0,0) is the bullseye. */
+export function dartScore(x, y) {
+  const r = Math.hypot(x, y);
+  if (r <= 0.0374) return { s: 50, label: 'Bullseye!' };
+  if (r <= 0.0935) return { s: 25, label: 'Outer bull' };
+  if (r > 1) return { s: 0, label: 'Miss' };
+  const deg = ((Math.atan2(x, -y) * 180) / Math.PI + 360 + 9) % 360;
+  const n = SECTORS[Math.floor(deg / 18) % 20];
+  if (r >= 0.953) return { s: n * 2, label: `Double ${n}` };
+  if (r >= 0.582 && r <= 0.629) return { s: n * 3, label: `Triple ${n}` };
+  return { s: n, label: String(n) };
+}
 
 export function create(kind, userId) {
   if (!KINDS[kind]) throw new UserError('Unknown game');
@@ -26,6 +45,7 @@ function fresh(g) {
   if (g.kind === 'ttt') g.state = { board: Array(9).fill(null), turn: g.first, winner: null, line: null };
   if (g.kind === 'c4') g.state = { board: Array(C4_COLS * C4_ROWS).fill(null), turn: g.first, winner: null, line: null, last: null };
   if (g.kind === 'rps') g.state = { picks: [null, null], score: [0, 0], rounds: [], winner: null };
+  if (g.kind === 'darts') g.state = { scores: [0, 0], turn: g.first, left: DARTS_PER_TURN, round: 1, rounds: DART_ROUNDS, throws: [[], []], last: null, winner: null };
 }
 
 export function join(g, userId) {
@@ -44,6 +64,32 @@ function finish(g, winner, line = null) {
 }
 
 const MOVES = {
+  darts(g, p, mv) {
+    const s = g.state;
+    if (s.turn !== p) throw new UserError('Not your turn');
+    const x = Number(mv?.x);
+    const y = Number(mv?.y);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) throw new UserError('Aim at the board');
+    const r = Math.hypot(x, y) || 1;
+    const k = r > 1.4 ? 1.4 / r : 1; // keep stray darts near the board
+    const hit = { x: +(x * k).toFixed(3), y: +(y * k).toFixed(3) };
+    const { s: points, label } = dartScore(hit.x, hit.y);
+    s.throws[p].push({ ...hit, s: points, label });
+    s.last = { p, s: points, label };
+    s.scores[p] += points;
+    s.left--;
+    if (s.left > 0) return;
+    const secondDone = p !== g.first;
+    if (secondDone) {
+      if (s.round >= DART_ROUNDS) {
+        const [a, b] = s.scores;
+        return finish(g, a === b ? 'draw' : a > b ? 0 : 1);
+      }
+      s.round++;
+    }
+    s.turn = 1 - p;
+    s.left = DARTS_PER_TURN;
+  },
   ttt(g, p, cell) {
     const s = g.state;
     if (s.turn !== p) throw new UserError('Not your turn');

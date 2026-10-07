@@ -9,14 +9,33 @@ const PALETTE = ['#ff6b6b', '#ff922b', '#f59f00', '#40c057', '#12b886', '#15aabf
 const NOTE_COLORS = ['#ffe66d', '#ffd6a5', '#caffbf', '#9bf6ff', '#ffc6ff', '#fdffb6'];
 const ANON_COLORS = ['#d0bfff', '#b8c0ff', '#c8d6e5'];
 const MAX_WALL_ITEMS = 600;
-const REC_COLS = ['podcasts', 'music', 'shows', 'books'];
+export const MEMO_COLORS = ['#ffe66d', '#ffd6a5', '#caffbf', '#9bf6ff', '#ffc6ff', '#ffadad', '#e9ecef'];
+const REC_COLS = ['podcasts', 'music', 'shows', 'books', 'places'];
+const PLACE_KINDS = ['restaurant', 'cafe', 'shop', 'bar', 'other'];
+const LOOKS_LIKE_URL = /^(https?:\/\/|www\.|maps\.app\.goo\.gl|goo\.gl\/|(?:[\w-]+\.)?google\.[a-z.]+\/maps)/i;
 const MAX_COMMENTS = 300;
+const JUKEBOX_TRACKS = 5;
 
 export const pickColor = (key) => PALETTE[parseInt(sha256(key).slice(0, 8), 16) % PALETTE.length];
 
+// Admins can remove anyone's stickers and wall notes. Matched on the full name (not just
+// the first name) so a new colleague called "Amir" can't take over. Override with
+// OFFICE_ADMINS="Amir Akbari, Another Person".
+const ADMIN_KEYS = new Set(
+  (process.env.OFFICE_ADMINS ?? 'Amir Akbari')
+    .split(',')
+    .map((n) => n.trim().replace(/\s+/g, ' '))
+    .filter(Boolean)
+    .map((n) => {
+      const [first, ...rest] = n.split(' ');
+      return `${first}|${rest.join(' ')}`.toLocaleLowerCase('en').normalize('NFKC');
+    }),
+);
+export const isAdmin = (u) => !!u && ADMIN_KEYS.has(u.key);
+
 export function publicUser(u) {
   const { id, firstName, lastName, avatar, mood, birthday, color, createdAt, lastSeen } = u;
-  return { id, firstName, lastName, avatar, mood, birthday, color, createdAt, lastSeen };
+  return { id, firstName, lastName, avatar, mood, birthday, color, createdAt, lastSeen, admin: isAdmin(u) };
 }
 
 const VIEWS = {
@@ -92,6 +111,9 @@ function canEditRequest(r, me, token) {
 
 export function createHub(io) {
   const online = new Map(); // userId -> Set<socketId>
+  // The office jukebox: one shared state for everyone (kept in memory, starts playing track 1).
+  const jukebox = { track: 0, playing: true, pos: 0, at: Date.now(), by: null };
+  const jukeboxView = () => ({ state: { ...jukebox }, now: Date.now() });
   const live = new Map(); // gameId -> game
   const leaveTimers = new Map();
 
@@ -107,7 +129,7 @@ export function createHub(io) {
     }
     cols.games = [...live.values()].map(games.view);
     cols.mail = Object.values(db.mail).filter((m) => m.to === me.id || m.from === me.id);
-    return { me: publicUser(me), online: [...online.keys()], cols };
+    return { me: publicUser(me), online: [...online.keys()], cols, jukebox: jukeboxView() };
   }
 
   function dropGame(g) {
@@ -134,6 +156,30 @@ export function createHub(io) {
 
   const A = {
     // ---------- profile ----------
+    // ---------- jukebox ----------
+    'jukebox.set'(me, p) {
+      const now = Date.now();
+      const elapsed = jukebox.playing ? (now - jukebox.at) / 1000 : 0;
+      if ('track' in p) {
+        const t = Number(p.track);
+        if (!Number.isInteger(t) || t < 0 || t >= JUKEBOX_TRACKS) throw new UserError('Unknown track');
+        if (t !== jukebox.track) {
+          jukebox.track = t;
+          jukebox.pos = 0;
+          jukebox.playing = p.playing !== false; // picking a track starts it
+        } else {
+          jukebox.pos += elapsed;
+        }
+      } else {
+        jukebox.pos += elapsed;
+      }
+      if (typeof p.playing === 'boolean') jukebox.playing = p.playing;
+      jukebox.at = now;
+      jukebox.by = me.id;
+      io.emit('jukebox', jukeboxView());
+    },
+
+    // ---------- profile ----------
     'profile.update'(me, p) {
       if ('mood' in p) me.mood = str(p.mood, 16);
       if ('birthday' in p) me.birthday = birthday(p.birthday);
@@ -143,7 +189,8 @@ export function createHub(io) {
 
     // ---------- sticker library & wall ----------
     'sticker.remove'(me, { id }) {
-      own('stickers', id, me);
+      if (isAdmin(me)) find('stickers', id);
+      else own('stickers', id, me);
       delete db.stickers[id];
       remove('stickers', id);
       for (const w of Object.values(db.wall)) {
@@ -163,6 +210,25 @@ export function createHub(io) {
       upsert('wall', w);
       return { id: w.id };
     },
+    'wall.addNote'(me, p) {
+      if (wallCount() >= MAX_WALL_ITEMS) throw new UserError('The wall is full! Remove a few items first.');
+      const w = {
+        id: newId(),
+        text: text(p.text, 200, true, 'Your note'),
+        color: oneOf(p.color, MEMO_COLORS, MEMO_COLORS[0]),
+        by: me.id,
+        u: unit(p.u, rand(0.15, 0.85)),
+        v: unit(p.v, rand(0.2, 0.8)),
+        rot: num(p.rot, -Math.PI, Math.PI, rand(-0.1, 0.1)),
+        scale: 1,
+        z: nextZ(),
+        at: Date.now(),
+      };
+      db.wall[w.id] = w;
+      persist();
+      upsert('wall', w);
+      return { id: w.id };
+    },
     'wall.update'(me, p) {
       const w = own('wall', p.id, me);
       place(w, p);
@@ -170,7 +236,8 @@ export function createHub(io) {
       upsert('wall', w);
     },
     'wall.remove'(me, { id }) {
-      own('wall', id, me);
+      if (isAdmin(me)) find('wall', id);
+      else own('wall', id, me);
       delete db.wall[id];
       persist();
       remove('wall', id);
@@ -368,6 +435,25 @@ export function createHub(io) {
     persist();
     upsert('music', item);
     toastOthers(me, { icon: '🎵', text: `${me.firstName} recommends “${item.title}”${item.artist ? ` by ${item.artist}` : ''}` });
+    return { id: item.id };
+  };
+  A['places.add'] = (me, p) => {
+    const title = str(p.title, 100, true, 'Place name');
+    const raw = str(p.map, 500);
+    if (!raw) throw new UserError('Add a Google Maps link or the address');
+    let url;
+    let address = '';
+    if (LOOKS_LIKE_URL.test(raw)) url = link(raw);
+    else {
+      // A plain address: build a Google Maps search link from it.
+      address = raw.slice(0, 160);
+      url = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${title} ${address}`)}`;
+    }
+    const item = { id: newId(), title, kind: oneOf(p.kind, PLACE_KINDS, 'other'), address, rating: Math.round(num(Number(p.rating), 0, 5, 0)), url, note: text(p.note, 400), by: me.id, likes: [], comments: [], at: Date.now() };
+    db.places[item.id] = item;
+    persist();
+    upsert('places', item);
+    toastOthers(me, { icon: '📍', text: `${me.firstName} shared a place: “${item.title}”` });
     return { id: item.id };
   };
   A['books.add'] = (me, p) => {

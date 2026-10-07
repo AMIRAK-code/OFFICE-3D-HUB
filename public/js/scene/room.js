@@ -286,7 +286,7 @@ function buildBirthdayBoard(open) {
 }
 
 // ---------------------------------------------------------------- window
-function buildWindow() {
+function buildWindow(open) {
   const g = new THREE.Group();
   g.position.set(7.55, 5.25, -6.95);
   scene.add(g);
@@ -342,6 +342,13 @@ function buildWindow() {
 
   onFrame((dt) => {
     cloudTex.offset.x += dt * 0.006;
+  });
+  // The window is the "Top Places" board: look outside, pick somewhere to go.
+  registerProp('places', g, {
+    label: 'Top Places', icon: '📍', accent: '#1c7ed6', hoverLift: false,
+    labelAt: new THREE.Vector3(0, H / 2 + 0.55, 0.3),
+    onClick: () => open('places'),
+    focus: { offset: new THREE.Vector3(0, 0, 1), fit: { w: 5.6, h: 4.6 } },
   });
   let lastHour = new Date().getHours();
   const applyTime = () => {
@@ -1141,6 +1148,231 @@ function buildArcade(open) {
   });
 }
 
+// ---------------------------------------------------------------- jukebox
+function buildJukebox(open) {
+  const g = new THREE.Group();
+  g.position.set(-9.45, 0, -2.0);
+  g.rotation.y = Math.PI / 2;
+  scene.add(g);
+  const inner = new THREE.Group();
+  g.add(inner);
+  const body = std('#8a2346', { roughness: 0.4, metalness: 0.15 });
+  const trim = std('#f1c453', { roughness: 0.3, metalness: 0.7 });
+  const dark = std('#2a1620', { roughness: 0.6 });
+  // Cabinet: rounded block topped with a half-cylinder dome
+  mesh(rbox(1.35, 1.35, 0.8, 0.08), body, inner, 0, 0.82, 0);
+  const domeGeo = new THREE.CylinderGeometry(0.675, 0.675, 0.8, 32, 1, false, 0, Math.PI);
+  domeGeo.rotateX(Math.PI / 2);
+  domeGeo.rotateZ(Math.PI / 2);
+  mesh(domeGeo, body, inner, 0, 1.5, 0);
+  mesh(rbox(1.5, 0.14, 0.9, 0.05), dark, inner, 0, 0.07, 0);
+  for (const x of [-0.6, 0.6]) mesh(new THREE.CylinderGeometry(0.06, 0.08, 0.1, 10), dark, inner, x, 0.02, 0.28);
+  // Screen with the track name and an equalizer
+  const tex = T.canvasTexture(320, 240);
+  const screen = new THREE.Mesh(new THREE.PlaneGeometry(1.0, 0.75), glow({ map: tex }));
+  screen.position.set(0, 1.28, 0.405);
+  inner.add(screen);
+  mesh(rbox(1.1, 0.85, 0.05, 0.03), trim, inner, 0, 1.28, 0.385).castShadow = false;
+  // Speaker grille & coin slot
+  const grille = mesh(new THREE.CircleGeometry(0.3, 28), std('#ffffff', { map: T.grilleTexture(), roughness: 0.8 }), inner, 0, 0.5, 0.405);
+  grille.castShadow = false;
+  mesh(rbox(0.22, 0.05, 0.04, 0.01), dark, inner, 0.0, 0.88, 0.41);
+  // Neon tubes
+  const neonMat = glow({ color: '#ff4fd8' });
+  const arc = new THREE.Mesh(new THREE.TorusGeometry(0.6, 0.03, 8, 40, Math.PI), neonMat);
+  arc.position.set(0, 1.5, 0.42);
+  arc.layers.set(FX_LAYER);
+  inner.add(arc);
+  const sideMat = glow({ color: '#4dd9ff' });
+  for (const x of [-0.64, 0.64]) {
+    const tube = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, 1.3, 8), sideMat);
+    tube.position.set(x, 0.82, 0.42);
+    tube.layers.set(FX_LAYER);
+    inner.add(tube);
+  }
+  const light = new THREE.PointLight('#ff6ee0', 0, 7, 1.6);
+  light.position.set(0, 1.4, 1.4);
+  inner.add(light);
+
+  const state = { name: 'Rainy Window', mood: '', playing: false, bpm: 72, level: () => 0 };
+  const bars = Array.from({ length: 14 }, () => 0);
+  let drawAcc = 0;
+  let bounce = 0;
+  onFrame((dt, t) => {
+    bounce = Math.max(0, bounce - dt * 1.5);
+    const hue = (t * 40) % 360;
+    const on = state.playing;
+    neonMat.color.setHSL(((300 + (on ? hue * 0.4 : 0)) % 360) / 360, 1, on ? 0.62 : 0.4);
+    sideMat.color.setHSL(((190 + (on ? hue * 0.3 : 0)) % 360) / 360, 1, on ? 0.6 : 0.35);
+    light.intensity = on ? 4 + Math.sin(t * 5) * 1.5 : 0.6;
+    inner.rotation.z = Math.sin(t * 22) * bounce * 0.03;
+    inner.position.y = on ? Math.abs(Math.sin((t * state.bpm) / 60 * Math.PI)) * 0.012 : 0;
+    drawAcc += dt;
+    if (drawAcc < 1 / 20) return;
+    drawAcc = 0;
+    const beat = (t * state.bpm) / 60;
+    const real = state.level();
+    bars.forEach((_, i) => {
+      const fake = on ? 0.25 + 0.55 * Math.abs(Math.sin(beat * Math.PI * (0.5 + (i % 5) * 0.23) + i)) * (0.6 + 0.4 * Math.sin(beat * 2 + i * 1.7)) : 0.04;
+      const target = real > 0.02 ? Math.min(1, fake * 0.5 + real * (0.5 + 0.5 * Math.sin(i * 1.3 + t * 3))) : fake;
+      bars[i] += (target - bars[i]) * 0.5;
+    });
+    tex.userData.redraw((ctx, w, h) => {
+      const bg = ctx.createLinearGradient(0, 0, 0, h);
+      bg.addColorStop(0, '#2b1055');
+      bg.addColorStop(1, '#120a2a');
+      ctx.fillStyle = bg;
+      ctx.fillRect(0, 0, w, h);
+      ctx.textAlign = 'center';
+      ctx.fillStyle = on ? '#ffe3fb' : '#a99bc2';
+      ctx.font = `700 ${state.name.length > 14 ? 30 : 36}px ${T.FONT}`;
+      ctx.fillText(state.name, w / 2, 62);
+      ctx.fillStyle = '#c9a8ff';
+      ctx.font = `600 20px ${T.BODY_FONT}`;
+      ctx.fillText(on ? '♪ now playing' : '❚❚ paused', w / 2, 94);
+      const bw = (w - 60) / bars.length;
+      bars.forEach((v, i) => {
+        const bh = 10 + v * 100;
+        const gr = ctx.createLinearGradient(0, h - 24 - bh, 0, h - 24);
+        gr.addColorStop(0, '#ff6ee0');
+        gr.addColorStop(1, '#4dd9ff');
+        ctx.fillStyle = gr;
+        ctx.fillRect(30 + i * bw + 2, h - 24 - bh, bw - 4, bh);
+      });
+    });
+  });
+
+  room.jukebox = {
+    setInfo(info) {
+      Object.assign(state, info);
+    },
+    setLevelFn(fn) {
+      state.level = fn;
+    },
+    bounce: () => {
+      bounce = 1;
+    },
+  };
+  registerProp('jukebox', g, {
+    label: 'Jukebox', icon: '🎵', accent: '#d6336c', hoverLift: false,
+    labelAt: new THREE.Vector3(0, 2.35, 0.2),
+    onClick: () => open('jukebox'),
+    focus: { offset: new THREE.Vector3(1, 0, 0.15), look: new THREE.Vector3(0, 1.0, 0), fit: { w: 2.6, h: 2.8 } },
+  });
+}
+
+// ---------------------------------------------------------------- dartboard
+const DART_SECTORS = [20, 1, 18, 4, 13, 6, 10, 15, 2, 17, 3, 19, 7, 16, 8, 11, 14, 9, 12, 5];
+
+function dartboardTexture() {
+  return T.canvasTexture(512, 512, (ctx, w) => {
+    const c = w / 2;
+    const R = c - 6;
+    const ring = (r0, r1, a0, a1, color) => {
+      ctx.beginPath();
+      ctx.arc(c, c, R * r1, a0, a1);
+      ctx.arc(c, c, R * r0, a1, a0, true);
+      ctx.closePath();
+      ctx.fillStyle = color;
+      ctx.fill();
+    };
+    ctx.fillStyle = '#15151b';
+    ctx.beginPath();
+    ctx.arc(c, c, c, 0, Math.PI * 2);
+    ctx.fill();
+    for (let i = 0; i < 20; i++) {
+      const a0 = (i * 18 - 9 - 90) * (Math.PI / 180);
+      const a1 = a0 + (18 * Math.PI) / 180;
+      const dark = i % 2 === 0;
+      const base = dark ? '#1c1c22' : '#f3e6c4';
+      const accent = dark ? '#d6283a' : '#1f9d55';
+      ring(0.0935, 0.953, a0, a1, base);
+      ring(0.953, 1.0, a0, a1, accent);
+      ring(0.582, 0.629, a0, a1, accent);
+    }
+    ring(0.0374, 0.0935, 0, Math.PI * 2, '#1f9d55');
+    ring(0, 0.0374, 0, Math.PI * 2, '#d6283a');
+    // wires
+    ctx.strokeStyle = 'rgba(200,200,210,0.7)';
+    ctx.lineWidth = 1.2;
+    for (const f of [0.0374, 0.0935, 0.582, 0.629, 0.953, 1]) {
+      ctx.beginPath();
+      ctx.arc(c, c, R * f, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    for (let i = 0; i < 20; i++) {
+      const a = (i * 18 - 9 - 90) * (Math.PI / 180);
+      ctx.beginPath();
+      ctx.moveTo(c + Math.cos(a) * R * 0.0935, c + Math.sin(a) * R * 0.0935);
+      ctx.lineTo(c + Math.cos(a) * R, c + Math.sin(a) * R);
+      ctx.stroke();
+    }
+    ctx.fillStyle = '#fff';
+    ctx.font = `700 34px ${T.FONT}`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    DART_SECTORS.forEach((n, i) => {
+      const a = (i * 18 - 90) * (Math.PI / 180);
+      ctx.fillText(String(n), c + Math.cos(a) * (c - 1) * 0.985, c + Math.sin(a) * (c - 1) * 0.985);
+    });
+  });
+}
+
+function buildDartboard(open) {
+  const g = new THREE.Group();
+  g.position.set(-9.9, 4.7, 1.2);
+  g.rotation.y = Math.PI / 2;
+  scene.add(g);
+  const inner = new THREE.Group();
+  g.add(inner);
+  const R = 0.95;
+  // Cabinet: wooden surround with two little doors that stay open
+  const wood = std('#7a4a2a', { roughness: 0.55 });
+  const surround = mesh(new THREE.CylinderGeometry(R + 0.22, R + 0.22, 0.12, 40), wood, inner, 0, 0, 0.04);
+  surround.rotation.x = Math.PI / 2;
+  mesh(new THREE.CylinderGeometry(R, R, 0.08, 48), std('#15151b'), inner, 0, 0, 0.12).rotation.x = Math.PI / 2;
+  const face = new THREE.Mesh(new THREE.CircleGeometry(R, 48), new THREE.MeshStandardMaterial({ map: dartboardTexture(), roughness: 0.85 }));
+  face.position.z = 0.165;
+  face.receiveShadow = true;
+  inner.add(face);
+  // Darts stuck in the board
+  const dartGroup = new THREE.Group();
+  inner.add(dartGroup);
+  const makeDart = (color) => {
+    const d = new THREE.Group();
+    const barrel = mesh(new THREE.CylinderGeometry(0.025, 0.02, 0.28, 10), std('#c0c4cc', { metalness: 0.8, roughness: 0.3 }), d, 0, 0, 0.16);
+    barrel.rotation.x = Math.PI / 2;
+    const tip = mesh(new THREE.CylinderGeometry(0.003, 0.012, 0.1, 8), std('#e9ecef', { metalness: 0.9 }), d, 0, 0, 0.03);
+    tip.rotation.x = Math.PI / 2;
+    mesh(new THREE.BoxGeometry(0.18, 0.012, 0.12), std(color), d, 0, 0, 0.34);
+    mesh(new THREE.BoxGeometry(0.012, 0.18, 0.12), std(color), d, 0, 0, 0.34);
+    return d;
+  };
+  [[0.3, -0.38, '#e03131'], [-0.05, -0.05, '#228be6'], [0.0, -0.57, '#e03131']].forEach(([x, y, color], i) => {
+    const d = makeDart(color);
+    d.position.set(x * R, -y * R, 0.165);
+    d.rotation.set(0.08 * (i - 1), -0.1 * i, 0);
+    dartGroup.add(d);
+  });
+  let shake = 0;
+  onFrame((dt, t) => {
+    shake = Math.max(0, shake - dt * 1.6);
+    dartGroup.rotation.z = Math.sin(t * 40) * shake * 0.03;
+    inner.rotation.z = Math.sin(t * 40) * shake * 0.01;
+  });
+  room.dartboard = {
+    shake: () => {
+      shake = 1;
+    },
+  };
+  registerProp('darts', g, {
+    label: 'Darts', icon: '🎯', accent: '#d6283a', hoverLift: false,
+    labelAt: new THREE.Vector3(0, -R - 0.5, 0.3),
+    onClick: () => open('darts'),
+    focus: { offset: new THREE.Vector3(1, 0, 0.12), fit: { w: 3.0, h: 3.0 } },
+  });
+}
+
 // ---------------------------------------------------------------- trash can
 function buildTrash(open) {
   const g = new THREE.Group();
@@ -1452,7 +1684,7 @@ export function buildRoom(open) {
   buildRoomShell();
   buildBoard(open);
   buildBirthdayBoard(open);
-  buildWindow();
+  buildWindow(open);
   buildNeonSign();
   buildPendants();
   buildFairyLights();
@@ -1462,6 +1694,8 @@ export function buildRoom(open) {
   buildBasket(open);
   buildRequestBox(open);
   buildTrash(open);
+  buildDartboard(open);
+  buildJukebox(open);
   buildArcade(open);
   buildCoffeeTable(open);
   buildPlant(-9.0, -6.1, 1.1);

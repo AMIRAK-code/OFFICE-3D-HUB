@@ -15,6 +15,11 @@ An interactive 3D office for your team. Everyone shows up as a live cursor with 
 | **📌 Request box** | Post requests publicly or anonymously and pin them to the wall as sticky notes. Others can +1 them and mark them done. Anonymous notes are never linked to a name, not even on the server. |
 | **💌 Sticker mail** | Send a sticker with a short message to a colleague. It flies onto their screen. |
 | **😀 Mood** | Set a mood emoji. It appears next to your cursor and in the people list. |
+| **🎵 Jukebox** | Five lo-fi tracks generated live in the browser. Everyone shares one player (anyone can play, pause or change track), but your own speaker is **always muted when you enter** until you click 🎧. |
+| **📍 Top Places** (window) | Share restaurants, cafés and shops with a Google Maps link or an address. Likes and comments. |
+| **📚 Book Club** (bookshelf) and **🎵 Music** (radio tab) | More recommendation lists, all with likes and comments. |
+| **📝 Text notes, 🗑️ trash can** | Write notes onto the wall; drag your stickers and notes into the trash can to delete them. |
+| **🎯 Darts** (left wall) | Two-player darts: 3 rounds of 3 darts, time the swaying crosshair. |
 | **🕹️ Game arcade** | Two-player Tic-Tac-Toe, Connect Four and Rock-Paper-Scissors. You can open a table or invite someone directly. |
 
 Other details: a working wall clock, a window whose sky follows the real time of day, a neon sign with your office name, and fairy lights. On phones you swipe sideways to look around the room.
@@ -50,6 +55,7 @@ OFFICE_PASSCODE=choose-something OFFICE_NAME="Acme HQ" npm start
 | --- | --- | --- |
 | `PORT` | `3000` | HTTP port |
 | `OFFICE_PASSCODE` | *(none)* | Shared passcode required at sign-in |
+| `OFFICE_ADMINS` | `Amir Akbari` | Comma-separated full names allowed to remove anyone's stickers and wall notes |
 | `OFFICE_NAME` | `Office Board` | Shown on the login screen, in the top bar and on the neon sign |
 | `DATA_DIR` | `./data` | Where the database and uploaded images are stored |
 

@@ -34,7 +34,7 @@ function stickerTexture(url) {
 
 const ownsSticker = (w) => w.by === store.me?.id;
 const ownsNote = (r) => (r.authorId && r.authorId === store.me?.id) || !!getAnonToken(r.id);
-const canEdit = (it) => (it.type === 'sticker' ? ownsSticker(it.data) : ownsNote(it.data));
+const canEdit = (it) => (it.type === 'note' ? ownsNote(it.data) : ownsSticker(it.data));
 const toLocal = (u, v) => ({ x: (u - 0.5) * BOARD.w, y: (v - 0.5) * BOARD.h });
 const toUV = (x, y) => ({ u: clamp(x / BOARD.w + 0.5, 0, 1), v: clamp(y / BOARD.h + 0.5, 0, 1) });
 
@@ -109,6 +109,42 @@ function drawNote(it) {
   });
 }
 
+const memoSignature = (m) => [m.text, m.color, store.user(m.by) ? shortName(store.user(m.by)) : ''].join('|');
+
+/** A free-form text note: coloured paper, hand-written look, signed by its author. */
+function drawMemo(it) {
+  const m = it.data;
+  const author = store.user(m.by);
+  it.sig = memoSignature(m);
+  it.tex.userData.redraw((ctx, w, hh) => {
+    const pad = 26;
+    ctx.save();
+    ctx.shadowColor = 'rgba(60,40,10,0.38)';
+    ctx.shadowBlur = 18;
+    ctx.shadowOffsetY = 9;
+    ctx.fillStyle = m.color;
+    ctx.beginPath();
+    ctx.roundRect(pad, pad, w - pad * 2, hh - pad * 2, 8);
+    ctx.fill();
+    ctx.restore();
+    const g = ctx.createLinearGradient(0, pad, 0, hh - pad);
+    g.addColorStop(0, 'rgba(255,255,255,0.4)');
+    g.addColorStop(0.35, 'rgba(255,255,255,0)');
+    g.addColorStop(1, 'rgba(0,0,0,0.06)');
+    ctx.fillStyle = g;
+    ctx.fill();
+    ctx.fillStyle = '#2b2140';
+    ctx.textBaseline = 'alphabetic';
+    const { lines, size } = T.fitText(ctx, m.text, { maxWidth: w - pad * 2 - 44, maxLines: 7, start: 48, min: 20, weight: 600, family: T.FONT });
+    const lineH = size + 8;
+    const top = pad + 58 + Math.max(0, ((hh - pad * 2 - 130) - lines.length * lineH) / 2);
+    lines.forEach((ln, i) => ctx.fillText(ln, pad + 22, top + i * lineH));
+    ctx.font = `700 22px ${T.BODY_FONT}`;
+    ctx.fillStyle = 'rgba(43,33,64,0.65)';
+    ctx.fillText(`— ${shortName(author)}`, pad + 22, hh - pad - 20);
+  });
+}
+
 // ---------------------------------------------------------------- items
 function setTarget(it, d) {
   const p = toLocal(d.u, d.v);
@@ -142,7 +178,8 @@ function createItem(type, data) {
     g.add(paper, pin);
     it.obj = g;
     it.loaded = true;
-    drawNote(it);
+    if (type === 'memo') drawMemo(it);
+    else drawNote(it);
   }
   it.obj.userData.wallItem = it;
   setTarget(it, data);
@@ -164,6 +201,7 @@ function upsertItem(type, data) {
   it.removing = 0;
   if (dragging?.it !== it) setTarget(it, data);
   if (type === 'note' && it.sig !== noteSignature(data)) drawNote(it);
+  if (type === 'memo' && it.sig !== memoSignature(data)) drawMemo(it);
 }
 
 function removeItem(key) {
@@ -181,11 +219,14 @@ function disposeItem(it) {
   items.delete(it.key);
 }
 
+const wallType = (w) => (w.text != null ? 'memo' : 'sticker');
+
 function syncAll() {
   const want = new Set();
   for (const w of store.list('wall')) {
-    want.add(`sticker:${w.id}`);
-    upsertItem('sticker', w);
+    const type = wallType(w);
+    want.add(`${type}:${w.id}`);
+    upsertItem(type, w);
   }
   for (const r of store.list('requests')) {
     if (!r.pinned) continue;
@@ -208,7 +249,7 @@ function sendPlace(it, final) {
   const { u, v } = toUV(it.target.x, it.target.y);
   const payload = { id: it.id, u, v, front: final };
   if (it.type === 'note') payload.token = getAnonToken(it.id);
-  act(it.type === 'sticker' ? 'wall.update' : 'request.update', payload).catch(final ? toastError : () => {});
+  act(it.type !== 'note' ? 'wall.update' : 'request.update', payload).catch(final ? toastError : () => {});
 }
 
 function update(it, patch) {
@@ -218,7 +259,7 @@ function update(it, patch) {
   const payload = { id: d.id, ...patch };
   if (it.type === 'note') payload.token = getAnonToken(d.id);
   sfx.click();
-  act(it.type === 'sticker' ? 'wall.update' : 'request.update', payload).catch(toastError);
+  act(it.type !== 'note' ? 'wall.update' : 'request.update', payload).catch(toastError);
 }
 
 const tool = (icon, label, fn) => h('button', { class: 'tool', title: label, 'aria-label': label, onClick: fn }, icon);
@@ -227,10 +268,11 @@ function showMenu(e, it) {
   const d = it.data;
   const own = canEdit(it);
   const content = [];
-  if (it.type === 'sticker') {
+  if (it.type !== 'note') {
+    const memo = it.type === 'memo';
     const by = store.user(d.by);
     content.push(h('div', { class: 'menu-head' }, avatarEl(by, 30),
-      h('div', {}, h('b', {}, own ? 'Your sticker' : fullName(by)), h('small', {}, `stuck ${timeAgo(d.at)}`))));
+      h('div', {}, h('b', {}, own ? (memo ? 'Your note' : 'Your sticker') : fullName(by)), h('small', {}, `${memo ? 'posted' : 'stuck'} ${timeAgo(d.at)}`))));
     if (own) {
       content.push(h('div', { class: 'menu-tools' },
         tool('↺', 'Rotate left', () => update(it, { rot: it.data.rot - 0.26 })),
@@ -239,8 +281,8 @@ function showMenu(e, it) {
         tool('－', 'Smaller', () => update(it, { scale: it.data.scale / 1.2 })),
         tool('⤒', 'Bring to front', () => update(it, { front: true }))));
     }
-    content.push(menuItem('💌', 'Send this sticker to someone', () => emit('open', { name: 'send', stickerId: d.stickerId })));
-    if (own) content.push(menuItem('🗑️', 'Remove from the wall', () => act('wall.remove', { id: d.id }).catch(toastError), { danger: true }));
+    if (!memo) content.push(menuItem('💌', 'Send this sticker to someone', () => emit('open', { name: 'send', stickerId: d.stickerId })));
+    if (own || store.me.admin) content.push(menuItem('🗑️', own ? 'Remove from the wall' : 'Remove (admin)', () => act('wall.remove', { id: d.id }).catch(toastError), { danger: true }));
   } else {
     const author = d.authorId ? store.user(d.authorId) : null;
     const voted = d.votes.includes(store.me.id);
@@ -364,7 +406,7 @@ async function throwAway(it) {
     setTarget(it, it.data);
   };
   try {
-    if (it.type === 'sticker') {
+    if (it.type !== 'note') {
       it.target.y = TRASH_LOCAL.y; // drop it in
       await act('wall.remove', { id: it.id });
     } else {
@@ -473,8 +515,10 @@ export function initWall() {
 
   on('col:wall', (e) => {
     if (e.type === 'reset') syncAll();
-    else if (e.type === 'remove') removeItem(`sticker:${e.id}`);
-    else upsertItem('sticker', e.item);
+    else if (e.type === 'remove') {
+      removeItem(`sticker:${e.id}`);
+      removeItem(`memo:${e.id}`);
+    } else upsertItem(wallType(e.item), e.item);
   });
   on('col:requests', (e) => {
     if (e.type === 'reset') syncAll();
@@ -483,9 +527,15 @@ export function initWall() {
     else removeItem(`note:${e.item.id}`);
   });
   on('col:users', () => {
-    for (const it of items.values()) if (it.type === 'note' && it.sig !== noteSignature(it.data)) drawNote(it);
+    for (const it of items.values()) {
+      if (it.type === 'note' && it.sig !== noteSignature(it.data)) drawNote(it);
+      if (it.type === 'memo' && it.sig !== memoSignature(it.data)) drawMemo(it);
+    }
   });
   document.fonts?.ready.then(() => {
-    for (const it of items.values()) if (it.type === 'note') drawNote(it);
+    for (const it of items.values()) {
+      if (it.type === 'note') drawNote(it);
+      if (it.type === 'memo') drawMemo(it);
+    }
   });
 }

@@ -17,15 +17,20 @@ import { openGames, joinGame } from './features/games.js';
 import { toggleTray, initStickers } from './features/stickers.js';
 import { openMail, openSendSticker, initMail } from './features/mail.js';
 import { openWall, closeWall } from './features/wallview.js';
+import { openJukebox } from './features/jukebox-ui.js';
+import * as jb from './jukebox.js';
 
 const PANELS = {
   radio: () => openRecs('radio'),
   tv: () => openRecs('tv'),
   books: () => openRecs('books'),
+  places: () => openRecs('places'),
   basket: openBasket,
   birthdays: openBirthdays,
   requests: (o) => openRequests(o),
   games: (o) => openGames(o),
+  darts: (o) => openGames({ ...o, focus: 'darts' }),
+  jukebox: openJukebox,
   people: openPeople,
   mail: openMail,
 };
@@ -64,6 +69,7 @@ function wireScene() {
     setBadge('radio', store.cols.podcasts.size + store.cols.music.size);
     setBadge('tv', store.cols.shows.size);
     setBadge('books', store.cols.books.size);
+    setBadge('places', store.cols.places.size);
     room.bookshelf.setCount(store.cols.books.size);
   };
   const games = () => {
@@ -78,11 +84,19 @@ function wireScene() {
   on('col:shows', recs);
   on('col:music', recs);
   on('col:books', recs);
+  on('col:places', recs);
   on('col:games', games);
   on('presence', monitor);
   on('col:users', monitor);
   setInterval(monitor, 30e3);
   room.tv.setSlides(tvSlides);
+  const jukeboxInfo = () => {
+    const j = store.jukebox;
+    if (j) room.jukebox.setInfo({ name: jb.TRACKS[j.track].name, playing: j.playing, bpm: jb.TRACKS[j.track].bpm });
+  };
+  room.jukebox.setLevelFn(jb.level);
+  on('jukebox', jukeboxInfo);
+  jukeboxInfo();
 }
 
 function wireEvents() {
@@ -151,11 +165,18 @@ async function boot() {
   initStickers();
   initMail();
   initBirthdays();
+  jb.initJukebox();
   wireScene();
   wireEvents();
   on('ready', () => {
     if (welcome?.birthday) act('profile.update', { birthday: welcome.birthday }).catch(() => {});
     toast(returning ? `Welcome back, ${store.me.firstName}! 👋` : `Welcome to the office, ${store.me.firstName}! Drag a sticker onto the wall to say hi 🎨`, { icon: '🏢', duration: 6000 });
+    // The jukebox always starts muted for you; offer a one-click way to listen.
+    setTimeout(() => {
+      if (store.jukebox?.playing && !jb.isListening()) {
+        toast('Lo-fi is playing on the jukebox — you’re muted', { icon: '🎧', duration: 9000, action: { label: 'Listen', onClick: () => jb.setListening(true) } });
+      }
+    }, 3500);
   });
   connect();
 }
